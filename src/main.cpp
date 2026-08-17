@@ -1720,6 +1720,15 @@ int main(int argc, char **argv)
 			restream_set_pinned_ip(ip.c_str());
 		}
 
+		// Optional: start restreaming automatically, so a headless/fixed setup
+		// (e.g. the VRX used as a USB dongle feeding ffplay on a PC) does not
+		// need the operator to toggle it in the menu after every boot. The
+		// valve is opened by the periodic target check once the pipeline is up.
+		if (config["restream"] && config["restream"]["enabled"] &&
+		    config["restream"]["enabled"].as<bool>()) {
+			restream_set_enabled(true);
+		}
+
 		if (config["os_sensors"] && config["os_sensors"].IsMap()) {
 			if (config["os_sensors"]["cpu"]) {
 				auto cpu = config["os_sensors"]["cpu"];
