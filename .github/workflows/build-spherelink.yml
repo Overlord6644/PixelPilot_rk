@@ -1,0 +1,67 @@
+name: Sphere Link binary
+
+# One clean job: build ONLY the pixelpilot binary for the Eachine Sphere Link
+# (runcam_wifilink image ABI), from the patched spherelink-buttons branch.
+# Trigger it by hand from the Actions tab (Run workflow) or `gh workflow run`.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: pixelpilot for Sphere Link
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PixelPilot_rk (patched branch)
+        uses: actions/checkout@v6
+        with:
+          ref: spherelink-buttons
+          submodules: recursive
+          path: PixelPilot_rk
+
+      - name: Checkout sbc-groundstations
+        uses: actions/checkout@v6
+        with:
+          repository: OpenIPC/sbc-groundstations
+          path: sbc-groundstations
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio rsync bc qemu-user-static binfmt-support
+
+      - name: Prepare workspace
+        run: |
+          sudo mkdir -p /mnt/workspace
+          sudo chown $USER:$USER /mnt/workspace
+          rsync -a sbc-groundstations/ /mnt/workspace/
+          echo "CACHE_DATE=$(date +%m)" >> $GITHUB_ENV
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: /tmp/ccache
+          key: runcam_wifilink-ccache-${{ env.CACHE_DATE }}
+          restore-keys: |
+            runcam_wifilink-ccache-
+
+      - name: Build pixelpilot
+        working-directory: /mnt/workspace
+        run: |
+          set -x
+          mkdir -p /tmp/ccache
+          export PIXELPILOT_OVERRIDE_SRCDIR=$GITHUB_WORKSPACE/PixelPilot_rk
+          export BR2_CCACHE_DIR=/tmp/ccache
+          DEFCONFIG=runcam_wifilink_defconfig bash build.sh pixelpilot-rebuild
+
+      - name: Extract binary
+        run: |
+          cp /mnt/workspace/output/runcam_wifilink_defconfig/target/usr/bin/pixelpilot \
+            spherelink_pixelpilot
+          ls -l spherelink_pixelpilot
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: spherelink-pixelpilot
+          path: spherelink_pixelpilot
