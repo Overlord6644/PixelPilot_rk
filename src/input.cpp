@@ -29,7 +29,7 @@ lv_timer_t * timer = NULL;
 #endif
 #ifndef USE_SIMULATOR
 extern bool menu_active;
-#define MAX_GPIO_BUTTONS 6  // Adjust based on your hardware
+#define MAX_GPIO_BUTTONS 7  // up/down/left/right/center/rec + one action button (e.g. "ap")
 #define DEBOUNCE_DELAY_MS 50 // Debounce delay in milliseconds
 #define INITIAL_REPEAT_DELAY_MS 500  // Time before repeat starts
 #define REPEAT_RATE_MS 100           // Time between repeated events
@@ -48,6 +48,18 @@ typedef struct {
     long repeat_time;
     bool is_holding;
     bool long_press_sent;
+    // Optional per-button request flags, for boards that wire a button to a
+    // line with the opposite polarity or no external pull. Built from the
+    // "active_low" and "bias" YAML keys and OR'd into the libgpiod request.
+    int req_flags;
+    // Optional shell commands. When set, the button runs the command instead
+    // of emitting a navigation key: `action` on a normal press, `long_action`
+    // on a long press. This is what lets a dedicated button (an "AP" key
+    // toggling the WiFi hotspot) do its real job, and lets a board disable the
+    // built-in long-press shortcuts by binding an empty command.
+    const char *action;       // NULL = behave as a normal key button
+    const char *long_action;  // NULL = keep the built-in long-press behaviour
+    bool has_long_action;     // true even when long_action is "" (explicit no-op)
 } gpio_button_t;
 
 // Global array of GPIO buttons
@@ -154,6 +166,31 @@ void init_button_from_config(YAML::Node& gpio_config, const char* button_name, i
         gpio_buttons[button_index].line_num = gpio_buttons[button_index].pin_number;
     }
 
+    // Optional extras, map form only: polarity, bias and shell actions. A
+    // button on a line with no external pull, or wired the other way round,
+    // needs these to be usable at all - the default request leaves the line
+    // floating and active-high.
+    if (gpio_config[button_name].IsMap()) {
+        YAML::Node bc = gpio_config[button_name];
+        if (bc["active_low"] && bc["active_low"].as<bool>())
+            gpio_buttons[button_index].req_flags |= GPIOD_LINE_REQUEST_FLAG_ACTIVE_LOW;
+        if (bc["bias"]) {
+            std::string b = bc["bias"].as<std::string>();
+            if (b == "pull-up" || b == "pull_up")
+                gpio_buttons[button_index].req_flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP;
+            else if (b == "pull-down" || b == "pull_down")
+                gpio_buttons[button_index].req_flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN;
+            else if (b == "disable" || b == "disabled")
+                gpio_buttons[button_index].req_flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE;
+        }
+        if (bc["action"])
+            gpio_buttons[button_index].action = strdup(bc["action"].as<std::string>().c_str());
+        if (bc["long_action"]) {
+            gpio_buttons[button_index].long_action = strdup(bc["long_action"].as<std::string>().c_str());
+            gpio_buttons[button_index].has_long_action = true;
+        }
+    }
+
     button_index++;
 }
 
@@ -167,6 +204,10 @@ void init_gpio_buttons_from_config(YAML::Node& config) {
     init_button_from_config(gpio_config, "right", button_index);
     init_button_from_config(gpio_config, "center", button_index);
     init_button_from_config(gpio_config, "rec", button_index);
+    // A dedicated action button, not a navigation key. On the Eachine Sphere
+    // Link this is the "AP" button, bound via `action:` to toggle the WiFi
+    // hotspot. It sends no LVGL key.
+    init_button_from_config(gpio_config, "ap", button_index);
 }
 
 // Function to initialize GPIO buttons
@@ -195,7 +236,20 @@ void setup_gpio(YAML::Node& config) {
         char consumer_name[32];
         snprintf(consumer_name, sizeof(consumer_name), "pixelpilot_%s", gpio_buttons[i].name);
 
-        if (gpiod_line_request_input(gpio_buttons[i].line, consumer_name) < 0) {
+        // Honour any per-button polarity/bias flags. A plain input request
+        // (flags 0) is byte-identical to the old gpiod_line_request_input.
+        int rc;
+        if (gpio_buttons[i].req_flags) {
+            struct gpiod_line_request_config cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            cfg.consumer = consumer_name;
+            cfg.request_type = GPIOD_LINE_REQUEST_DIRECTION_INPUT;
+            cfg.flags = gpio_buttons[i].req_flags;
+            rc = gpiod_line_request(gpio_buttons[i].line, &cfg, 0);
+        } else {
+            rc = gpiod_line_request_input(gpio_buttons[i].line, consumer_name);
+        }
+        if (rc < 0) {
             perror("Failed to request GPIO input");
             gpiod_chip_close(gpio_buttons[i].chip);
             gpio_buttons[i].chip = NULL;
@@ -205,6 +259,20 @@ void setup_gpio(YAML::Node& config) {
 }
 
 void send_long_press_event(size_t button_index) {
+    // A configured long_action wins over the built-in shortcuts. An empty
+    // string is an explicit "do nothing", which is how a board turns off the
+    // surprising long-left-toggles-recording behaviour when it has a dedicated
+    // record button.
+    if (gpio_buttons[button_index].has_long_action) {
+        const char *cmd = gpio_buttons[button_index].long_action;
+        if (cmd && *cmd) {
+            printf("GPIO Long Press: %s (action: %s)\n",
+                   gpio_buttons[button_index].name, cmd);
+            if (system(cmd) < 0)
+                perror("long_action");
+        }
+        return;
+    }
     if (strcmp(gpio_buttons[button_index].name, "right") == 0) {
         next_key = LV_KEY_ENTER;
         next_key_pressed = true;
@@ -226,6 +294,17 @@ void send_long_press_event(size_t button_index) {
 
 void send_button_event(size_t button_index) {
     if (gpio_buttons[button_index].name == NULL) return;
+
+    // An action button runs its command and emits no navigation key. This is
+    // how a dedicated button (e.g. "ap" toggling the WiFi hotspot) does its job
+    // instead of doubling as Enter.
+    if (gpio_buttons[button_index].action) {
+        printf("GPIO Press: %s (action: %s)\n",
+               gpio_buttons[button_index].name, gpio_buttons[button_index].action);
+        if (system(gpio_buttons[button_index].action) < 0)
+            perror("action");
+        return;
+    }
 
     // Adjust for control_mode
     switch (control_mode) {
@@ -364,9 +443,14 @@ void handle_gpio_input(void) {
             if (gpio_buttons[i].is_holding && current_state == 1 && 
                 current_time >= gpio_buttons[i].repeat_time) {
                 
-                // Special long-press handling for 'right' and 'left'
+                // Long-press (fire once), for 'right'/'left' and for any button
+                // carrying an action/long_action. Action buttons must not enter
+                // the key-repeat path below, or a single hold would run their
+                // command dozens of times.
                 if (strcmp(gpio_buttons[i].name, "right") == 0 ||
-                    strcmp(gpio_buttons[i].name, "left") == 0) {
+                    strcmp(gpio_buttons[i].name, "left") == 0 ||
+                    gpio_buttons[i].action ||
+                    gpio_buttons[i].has_long_action) {
                     if (!gpio_buttons[i].long_press_sent) {
                         send_long_press_event(i);
                         gpio_buttons[i].long_press_sent = true;
