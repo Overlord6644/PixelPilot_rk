@@ -273,16 +273,8 @@ void send_long_press_event(size_t button_index) {
         }
         return;
     }
-    if (strcmp(gpio_buttons[button_index].name, "right") == 0) {
-        next_key = LV_KEY_ENTER;
-        next_key_pressed = true;
-
-        printf("GPIO Long Press: %s (acting as center) (Pin: %d, Chip: %s)\n",
-               gpio_buttons[button_index].name,
-               gpio_buttons[button_index].pin_number,
-               gpio_buttons[button_index].chip_name);
-    }
-    else if (strcmp(gpio_buttons[button_index].name, "left") == 0 && !menu_active) {
+    // 'right' long-press intentionally does nothing (was: acting as Enter).
+    if (strcmp(gpio_buttons[button_index].name, "left") == 0 && !menu_active) {
         toggle_rec_enabled();
 
         printf("GPIO Long Press: %s (toggling recording) (Pin: %d, Chip: %s)\n",
@@ -404,7 +396,14 @@ void handle_gpio_input(void) {
     for (size_t i = 0; i < sizeof(gpio_buttons) / sizeof(gpio_buttons[0]); i++) {
         if (gpio_buttons[i].chip && gpio_buttons[i].line) {
             int current_state = gpiod_line_get_value(gpio_buttons[i].line);
-            
+
+            // left/right are dual-function (short vs long press) only in NAV.
+            // In KEYBOARD/EDIT they are plain directional keys and should
+            // auto-repeat while held (scroll through characters/values).
+            int nav = (control_mode == GSMENU_CONTROL_MODE_NAV);
+            int lr  = (strcmp(gpio_buttons[i].name, "left") == 0 ||
+                       strcmp(gpio_buttons[i].name, "right") == 0);
+
             // Check for state change (with debounce)
             if (current_state != gpio_buttons[i].last_state &&
                 (current_time - gpio_buttons[i].last_time) > DEBOUNCE_DELAY_MS) {
@@ -417,19 +416,17 @@ void handle_gpio_input(void) {
                     gpio_buttons[i].long_press_sent = false;
                     gpio_buttons[i].repeat_time = current_time + INITIAL_REPEAT_DELAY_MS;
                     
-                    // Fire event immediately for all buttons EXCEPT 'right' and 'left'.
-                    // For those, we wait to see if it's a short or long press.
-                    if (strcmp(gpio_buttons[i].name, "right") != 0 &&
-                        strcmp(gpio_buttons[i].name, "left") != 0) {
+                    // Fire immediately for everything except left/right IN NAV,
+                    // which defer to tell a short press from a long one.
+                    if (!(lr && nav)) {
                         send_button_event(i);
                     }
                 } else { // Button released
                     gpio_buttons[i].is_holding = false;
-                    
-                    // If 'right' or 'left' was released without a long press, send the normal event now.
-                    if ((strcmp(gpio_buttons[i].name, "right") == 0 ||
-                         strcmp(gpio_buttons[i].name, "left") == 0) &&
-                        !gpio_buttons[i].long_press_sent) {
+
+                    // A deferred left/right (NAV) released without a long press:
+                    // send its normal short-press event now.
+                    if (lr && nav && !gpio_buttons[i].long_press_sent) {
                         send_button_event(i);
                     } else {
                         // For all other buttons, or for a long-pressed 'right' button,
@@ -443,21 +440,20 @@ void handle_gpio_input(void) {
             if (gpio_buttons[i].is_holding && current_state == 1 && 
                 current_time >= gpio_buttons[i].repeat_time) {
                 
-                // Long-press (fire once), for 'right'/'left' and for any button
-                // carrying an action/long_action. Action buttons must not enter
-                // the key-repeat path below, or a single hold would run their
-                // command dozens of times.
-                if (strcmp(gpio_buttons[i].name, "right") == 0 ||
-                    strcmp(gpio_buttons[i].name, "left") == 0 ||
-                    gpio_buttons[i].action ||
-                    gpio_buttons[i].has_long_action) {
+                // Fire the long-press once for: left/right in NAV, any button
+                // with a long_action (NAV only - in KEYBOARD/EDIT the key must
+                // repeat instead), and pure action buttons (never repeat, any
+                // mode). Everything else auto-repeats.
+                if ((lr && nav) ||
+                    (gpio_buttons[i].has_long_action && nav) ||
+                    (gpio_buttons[i].action && !lr)) {
                     if (!gpio_buttons[i].long_press_sent) {
                         send_long_press_event(i);
                         gpio_buttons[i].long_press_sent = true;
                     }
                 }
                 else {
-                    // Standard repeat for all other buttons
+                    // Standard repeat (up/down always; left/right in KEYBOARD/EDIT)
                     send_button_event(i);
                     gpio_buttons[i].repeat_time = current_time + REPEAT_RATE_MS;
                 }
