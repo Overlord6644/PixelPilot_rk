@@ -331,16 +331,18 @@
             "facts": []
         },
         {
+            "__comment": "RSSI-driven, not Mbps-driven. aalink lowers the bitrate ON PURPOSE when the link tightens, so a received-Mbps trigger lights the border on a perfectly healthy link and stays dark on a strong link that is simply idle - it warns about the symptom the radio already handled. RSSI warns about the cause, early. Thresholds match the pcpilot ground station halo (RSSI_GOOD 45 / RSSI_BAD 22): critical < threshold tells the widget lower-is-worse, and it ramps 0 at 45% to full at 22%. Both antennas are bound and the widget reacts to the BEST of them, so one antenna in the shade cannot raise a false alarm. These are AP-FPV percentages (os_mon.wifi.rssi); a wfb-ng setup reports dBm on wfbcli.rx.ant_stats.rssi_avg and would need its own scale, around -70 / -85. Add adapter 1 and 2 here if the VRX ever carries more cards - but note that a card reporting a bogus high RSSI would then suppress the warning.",
             "name": "SignalWarning",
             "type": "SignalWarningWidget",
             "x": 0,
             "y": 0,
-            "rate": true,
-            "rate_divisor": 125000,
             "average_ms": 1000,
-            "threshold": 8,
-            "critical": 2,
-            "facts": [ { "name": "gstreamer.received_bytes" } ]
+            "threshold": 45,
+            "critical": 22,
+            "facts": [
+                {"name": "os_mon.wifi.rssi", "tags": {"adapter": "0", "type": "rssi_a"}},
+                {"name": "os_mon.wifi.rssi", "tags": {"adapter": "0", "type": "rssi_b"}}
+            ]
         },
         {
             "name": "APFPV WiFi RF temperature adapter 1",
