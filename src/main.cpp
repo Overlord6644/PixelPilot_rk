@@ -602,6 +602,16 @@ static void dvr_configure_reenc_receiver() {
 		receiver->dvr_reenc_set_config(reenc_params.codec, dvr_max_file_size, dvr_reenc_next_base_path);
 }
 
+/* The OSD shares ONE slot between the recording flag and the gadget-relay
+ * flag (config_osd.json, both at -250,125): they are mutually exclusive on
+ * screen, so the published fact already carries the exclusion - restream on
+ * AND not recording - and recording wins. Called from every place that
+ * changes either state; publishing the same value twice is harmless. */
+extern "C" void osd_refresh_gadget_flag(void) {
+	bool show = restream_get_enabled() && !dvr_enabled;
+	osd_publish_bool_fact("restream.active", NULL, 0, show);
+}
+
 void sigusr1_handler(int signum) {
 	spdlog::info("Received signal {}", signum);
 	bool was_enabled = dvr_enabled;
@@ -615,12 +625,14 @@ void sigusr1_handler(int signum) {
 		}
 		dvr_enabled = 0;
 		osd_publish_bool_fact("dvr.recording", NULL, 0, false);
+		osd_refresh_gadget_flag();
 	} else {
 		// Starting
 		spdlog::info("DVR: starting recording (SIGUSR1, mode={})",
 		             dvr_mode == DVR_MODE_RAW ? "raw" : dvr_mode == DVR_MODE_REENCODE ? "reencode" : "both");
 		dvr_enabled = 1;
 		osd_publish_bool_fact("dvr.recording", NULL, 0, true);
+		osd_refresh_gadget_flag();
 		if (receiver) {
 			receiver->dvr_request_recording(dvr_mode_has_raw());
 			receiver->dvr_reenc_request_recording(dvr_mode_has_reenc());
@@ -740,6 +752,7 @@ extern "C" {
                      dvr_mode == DVR_MODE_RAW ? "raw" : dvr_mode == DVR_MODE_REENCODE ? "reencode" : "both");
         dvr_enabled = 1;
         osd_publish_bool_fact("dvr.recording", NULL, 0, true);
+        osd_refresh_gadget_flag();
         if (receiver) {
             receiver->dvr_request_recording(dvr_mode_has_raw());
             receiver->dvr_reenc_request_recording(dvr_mode_has_reenc());
@@ -755,6 +768,7 @@ extern "C" {
         }
         dvr_enabled = 0;
         osd_publish_bool_fact("dvr.recording", NULL, 0, false);
+        osd_refresh_gadget_flag();
     }
 
     // Called from the FrameProcessor thread the first time a frame can't be
@@ -776,6 +790,7 @@ extern "C" {
         if (dvr_mode != DVR_MODE_BOTH) {
             dvr_enabled = 0;
             osd_publish_bool_fact("dvr.recording", NULL, 0, false);
+            osd_refresh_gadget_flag();
         }
     }
 
@@ -1898,9 +1913,12 @@ int main(int argc, char **argv)
 			             dvr_mode == DVR_MODE_RAW ? "raw" : dvr_mode == DVR_MODE_REENCODE ? "reencode" : "both");
 			dvr_enabled = 1;
 			osd_publish_bool_fact("dvr.recording", NULL, 0, true);
+			osd_refresh_gadget_flag();
 			if (reencoder) reencoder->request_idr();
 		}
 	}
+	osd_refresh_gadget_flag();   /* initial state of the shared OSD slot */
+
 	ret = pthread_create(&tid_frame, NULL, __FRAME_THREAD__, NULL);
 	assert(!ret);
 	ret = pthread_create(&tid_display, NULL, __DISPLAY_THREAD__, NULL);

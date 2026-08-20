@@ -1439,15 +1439,20 @@ private:
 
 class DvrStatusWidget: public IconTextWidget {
 public:
-	DvrStatusWidget(int pos_x, int pos_y, std::string icon_path, std::string text) :
-		IconTextWidget(pos_x, pos_y, std::move(icon_path), std::move(text)) {
+	// `color` is the text colour (default red). A second instance in the same
+	// slot with a calmer colour is how the gadget-relay flag shares the
+	// recording line without reading as an alarm.
+	DvrStatusWidget(int pos_x, int pos_y, std::string icon_path, std::string text,
+	                uint32_t color = 0xff0000) :
+		IconTextWidget(pos_x, pos_y, std::move(icon_path), std::move(text)),
+		text_color(color) {
 		args.push_back(Fact());
 	}
 
 	void createLvObjects(lv_obj_t* parent, int screen_w, int screen_h) override {
 		IconTextWidget::createLvObjects(parent, screen_w, screen_h);
-		// Red text, initially hidden
-		lv_obj_set_style_text_color(lv_label, lv_color_make(255, 0, 0), LV_PART_MAIN);
+		// Coloured text, initially hidden
+		lv_obj_set_style_text_color(lv_label, lv_color_hex(text_color), LV_PART_MAIN);
 		lv_obj_add_flag(lv_icon, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(lv_label, LV_OBJ_FLAG_HIDDEN);
 	}
@@ -1464,6 +1469,8 @@ public:
 	}
 
 private:
+	uint32_t text_color;
+
 	void updateStatus() {
 		bool recording = args[0].isDefined() && args[0].getBoolValue();
 		if (recording) {
@@ -2640,7 +2647,18 @@ public:
 			} else if(type == "DvrStatusWidget") {
 				auto text = widget_j.at("text").template get<std::string>();
 				auto icon_path = widget_j.at("icon_path").template get<std::filesystem::path>();
-				addWidget(new DvrStatusWidget(x, y, lvIconPath(assets_dir, icon_path), text), matchers);
+				// optional "color": "rrggbb" (default red)
+				uint32_t color = 0xff0000;
+				auto color_s = widget_j.value("color", std::string());
+				if (!color_s.empty()) {
+					try { color = (uint32_t)std::stoul(color_s, nullptr, 16); }
+					catch (const std::exception&) {
+						spdlog::warn("osd: widget {} has an invalid color '{}', keeping red",
+						             name, color_s);
+					}
+				}
+				addWidget(new DvrStatusWidget(x, y, lvIconPath(assets_dir, icon_path), text, color),
+				          matchers);
 			} else if(type == "VideoWidget") {
 				auto tpl = widget_j.at("template").template get<std::string>();
 				auto icon_path = widget_j.at("icon_path").template get<std::filesystem::path>();

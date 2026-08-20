@@ -298,6 +298,19 @@
             ]
         },
         {
+            "__comment": "Gadget relay: same slot as the recording flag on purpose - the VRX either tapes or feeds a PC over USB, never both on this line, and the published fact already excludes the recording case (see osd_refresh_gadget_flag in main.cpp). Blue, not red: it is a state, not a warning.",
+            "name": "Gadget relay status",
+            "type": "DvrStatusWidget",
+            "x": -250,
+            "y": 125,
+            "icon_path": "network.png",
+            "text": "GADGET ON",
+            "color": "3cb4ff",
+            "facts": [
+                {"name": "restream.active"}
+            ]
+        },
+        {
             "name": "Custom fading message",
             "type": "PopupWidget",
             "x": 400,

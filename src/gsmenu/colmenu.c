@@ -21,6 +21,7 @@ extern void audio_set_enabled(int enabled);
  * here rather than including gstrtpreceiver.h, which drags in gst/gst.h. */
 extern bool         restream_get_enabled(void);
 extern void         restream_set_enabled(bool enabled);
+extern void         osd_refresh_gadget_flag(void);   /* main.cpp */
 extern void         restream_scan_clients(char * buf, size_t buf_len);
 extern const char * restream_get_manual_ip(void);
 extern void         restream_set_manual_ip(const char * ip);
@@ -405,6 +406,7 @@ static void do_set(void * ctx, const char * value)
     if(b->param && strncmp(b->param, "restream_", 9) == 0) {
         if(strcmp(b->param, "restream_enabled") == 0)
             restream_set_enabled(value && strcmp(value, "on") == 0);
+            osd_refresh_gadget_flag();   /* the OSD flag follows the relay */
         else if(strcmp(b->param, "restream_target") == 0)
             restream_set_manual_ip(value ? value : "");   /* "Auto" → auto-discover */
         if(b->on_change) b->on_change(value ? value : "");
