@@ -404,9 +404,10 @@ static void do_set(void * ctx, const char * value)
     /* Restream applies to the running app only (see colmenu_get) — apply it
      * straight away and skip the gsmenu.sh set entirely. */
     if(b->param && strncmp(b->param, "restream_", 9) == 0) {
-        if(strcmp(b->param, "restream_enabled") == 0)
+        if(strcmp(b->param, "restream_enabled") == 0) {
             restream_set_enabled(value && strcmp(value, "on") == 0);
             osd_refresh_gadget_flag();   /* the OSD flag follows the relay */
+        }
         else if(strcmp(b->param, "restream_target") == 0)
             restream_set_manual_ip(value ? value : "");   /* "Auto" → auto-discover */
         if(b->on_change) b->on_change(value ? value : "");
