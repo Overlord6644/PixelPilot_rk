@@ -1204,8 +1204,16 @@ private:
 	// Fade the halo hue with severity to mirror the opacity ramp: yellow at the
 	// threshold (s~0) through to red at critical (s~1). The SW gradient is recomputed
 	// from the descriptor on every draw, so mutating the stops in place is enough.
+	// Amber (255,150,0) -> red (255,40,0), with the red held back by a CUBIC
+	// curve: the halo stays amber through most of the degradation and only
+	// turns red in the last stretch - i.e. when the link is genuinely at
+	// aalink's last MCS rung, not as soon as the warning begins. Matches the
+	// pcpilot ground-station halo exactly (hud.c render_halo_rect), so the
+	// same RSSI paints the same colour on the VRX and on the PC. A linear
+	// yellow->red ramp reddened far too early to mean anything.
 	void setHalo(double s) {
-		uint8_t green = (uint8_t)(255.0 * (1.0 - s) + 0.5);
+		double tred = s * s * s;
+		uint8_t green = (uint8_t)(150.0 + (40.0 - 150.0) * tred + 0.5);
 		lv_color_t c = lv_color_make(255, green, 0);
 		for (int i = 0; i < 4; i++) {
 			grad[i].stops[0].color = c;
@@ -1215,7 +1223,13 @@ private:
 	}
 
 	static constexpr double   kBorderPct = 5.0;  // gradient band, % of screen height
-	static constexpr lv_opa_t kMaxOpa    = 216;   // ~0.85 opacity at full severity
+	// ~0.36 at the edge on full severity, matching the pcpilot halo
+	// (hud.c: A = 0.18 + 0.18*t). It used to be 216, i.e. 0.85: for the same
+	// RSSI the VRX shouted where the PC hinted, and a warning you cannot see
+	// past is one you end up resenting rather than reading. The band stays at
+	// 5 % of the height - pcpilot sweeps 3-7 % with severity and 5 sits in
+	// the middle of that, which is close enough to leave alone.
+	static constexpr lv_opa_t kMaxOpa    = 92;
 
 	double threshold, critical;
 	std::unique_ptr<RunningAverage> avg;   // optional smoothing of the aggregated value (value mode)
