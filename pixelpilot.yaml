@@ -30,6 +30,24 @@ gsmenu:
     # right: 32
     # up: 16
     # down: 18
+    # Eachine Sphere Link VRX - the map form carries the extra keys below.
+    # up:     { chip: gpiochip3, pin: 9 }
+    # down:   { chip: gpiochip3, pin: 10 }
+    # left:   { chip: gpiochip3, pin: 2, long_action: "" }   # no long-press record; there is a REC button
+    # center: { chip: gpiochip3, pin: 1 }
+    # rec:    { chip: gpiochip3, pin: 18 }
+    # 5-way RIGHT is active-low with no external pull:
+    # right:  { chip: gpiochip3, pin: 5, bias: pull-up, active_low: true }
+    # dedicated AP button toggles the WiFi hotspot instead of duplicating Enter:
+    # ap:     { chip: gpiochip3, pin: 6, action: "gsmenu.sh set gs wifi hotspot toggle" }
+    #
+    # Optional per-button keys (map form only), all backward compatible:
+    #   active_low: true                   invert the line (idle 1, pressed 0)
+    #   bias: pull-up|pull-down|disable    internal pull for a floating line
+    #   action: "<cmd>"                    run a command on press instead of a key
+    #   long_action: "<cmd>"               run a command on long press
+    #                                      ("" = do nothing = disable the shortcut)
+    # A button named "ap" is a 7th, action-only slot for a dedicated button.
   # Define custom actions here
   # action is the command the button will trigger
   # actions:
